@@ -3,3 +3,6 @@ opencv-python-headless
 numpy
 pandas
 pydicom
+Pillow
+streamlit-drawable-canvas
+openpyxl
