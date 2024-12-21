@@ -31,17 +31,12 @@ def load_dicom(uploaded_file):
         if uploaded_file is not None:
             bytes_data = uploaded_file.getvalue()
             dicom_data = pydicom.dcmread(io.BytesIO(bytes_data))
-            image = dicom_data.pixel_array.astype(np.float32)
+            image = dicom_data.pixel_array.astype(float)
             
             # Apply rescale slope and intercept
             rescale_slope = getattr(dicom_data, 'RescaleSlope', 1)
             rescale_intercept = getattr(dicom_data, 'RescaleIntercept', 0)
             image = (image * rescale_slope) + rescale_intercept
-            
-            # Normalize to 0-255 range
-            image_min = np.min(image)
-            image_max = np.max(image)
-            image = ((image - image_min) / (image_max - image_min) * 255).astype(np.uint8)
             
             return image, dicom_data
     except Exception as e:
@@ -52,22 +47,23 @@ def load_dicom(uploaded_file):
 def analyze_point(image, dicom_data, x, y):
     try:
         # Create a circular mask
-        mask = np.zeros_like(image, dtype=np.uint8)
         y_indices, x_indices = np.ogrid[:image.shape[0], :image.shape[1]]
         distance_from_center = np.sqrt((x_indices - x)**2 + (y_indices - y)**2)
-        mask[distance_from_center <= st.session_state.circle_diameter / 2] = 1
+        mask = distance_from_center <= st.session_state.circle_diameter / 2
 
         # Extract pixel values within the circle
-        pixels = image[mask == 1]
+        pixels = image[mask]
 
         # Calculate metrics
         area_pixels = np.sum(mask)
         pixel_spacing = float(dicom_data.PixelSpacing[0])
         area_mm2 = area_pixels * (pixel_spacing**2)
-        mean = np.mean(pixels)
-        stddev = np.std(pixels)
-        min_val = np.min(pixels)
-        max_val = np.max(pixels)
+        
+        # Calculate statistics from the original pixel values
+        mean = np.mean(pixels) if len(pixels) > 0 else 0
+        stddev = np.std(pixels) if len(pixels) > 0 else 0
+        min_val = np.min(pixels) if len(pixels) > 0 else 0
+        max_val = np.max(pixels) if len(pixels) > 0 else 0
 
         return {
             'Area (mm²)': f"{area_mm2:.3f}",
@@ -79,6 +75,21 @@ def analyze_point(image, dicom_data, x, y):
     except Exception as e:
         st.error(f"Error analyzing point: {str(e)}")
         return None
+
+def prepare_display_image(image):
+    """Prepare image for display while preserving original values for analysis"""
+    display_image = image.copy()
+    
+    # Normalize to 0-255 range for display
+    image_min = np.min(display_image)
+    image_max = np.max(display_image)
+    display_image = ((display_image - image_min) / (image_max - image_min) * 255).astype(np.uint8)
+    
+    # Convert to RGB
+    if len(display_image.shape) == 2:
+        display_image = cv2.cvtColor(display_image, cv2.COLOR_GRAY2RGB)
+        
+    return display_image
 
 def draw_circle_on_image(image, x, y, diameter, color=(0, 255, 255)):
     try:
@@ -126,6 +137,10 @@ if file1 is not None and file2 is not None:
     image2, dicom_data2 = load_dicom(file2)
 
     if image1 is not None and image2 is not None:
+        # Prepare display images
+        image_display1 = prepare_display_image(image1)
+        image_display2 = prepare_display_image(image2)
+
         # Display images side by side with canvas
         col1, col2 = st.columns(2)
         
@@ -134,11 +149,6 @@ if file1 is not None and file2 is not None:
         
         with col1:
             st.header("Image 1")
-            # Convert to RGB if needed
-            if len(image1.shape) == 2:
-                image_display1 = cv2.cvtColor(image1, cv2.COLOR_GRAY2RGB)
-            else:
-                image_display1 = image1.copy()
             
             # Calculate height while maintaining aspect ratio
             aspect_ratio = image_display1.shape[0] / image_display1.shape[1]
@@ -177,11 +187,6 @@ if file1 is not None and file2 is not None:
 
         with col2:
             st.header("Image 2")
-            # Convert to RGB if needed
-            if len(image2.shape) == 2:
-                image_display2 = cv2.cvtColor(image2, cv2.COLOR_GRAY2RGB)
-            else:
-                image_display2 = image2.copy()
             
             # Calculate height while maintaining aspect ratio
             aspect_ratio = image_display2.shape[0] / image_display2.shape[1]
