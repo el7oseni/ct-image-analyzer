@@ -123,44 +123,32 @@ if file1 is not None and file2 is not None:
         image_display1 = cv2.normalize(image1, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         image_display2 = cv2.normalize(image2, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-        # Convert to RGB for display
-        if len(image_display1.shape) == 2:
-            image_display1 = cv2.cvtColor(image_display1, cv2.COLOR_GRAY2RGB)
-        if len(image_display2.shape) == 2:
-            image_display2 = cv2.cvtColor(image_display2, cv2.COLOR_GRAY2RGB)
-
         # Display images side by side
         col1, col2 = st.columns(2)
         
         with col1:
             st.header("Image 1")
             
-            # Calculate display dimensions
-            display_width = 512  # Base display width
-            aspect_ratio = image_display1.shape[0] / image_display1.shape[1]
-            display_height = int(display_width * aspect_ratio)
+            # Display image first
+            st.image(image_display1, use_column_width=True)
             
-            # Create canvas for image 1
+            # Add canvas overlay for clicking
             canvas_result1 = st_canvas(
                 fill_color="rgba(255, 255, 0, 0.3)",
                 stroke_width=1,
                 stroke_color="#yellow",
-                background_image=Image.fromarray(image_display1),
+                background_image=None,
                 drawing_mode="point",
                 key="canvas1",
-                width=display_width,
-                height=display_height,
+                width=image_display1.shape[1],
+                height=image_display1.shape[0],
                 display_toolbar=True
             )
             
-            # Handle mouse clicks for image 1
             if canvas_result1.json_data is not None and len(canvas_result1.json_data["objects"]) > 0:
                 last_point = canvas_result1.json_data["objects"][-1]
-                # Scale coordinates back to original image size
-                scale_x = image1.shape[1] / display_width
-                scale_y = image1.shape[0] / display_height
-                x1 = int(last_point["left"] * scale_x)
-                y1 = int(last_point["top"] * scale_y)
+                x1 = int(last_point["left"])
+                y1 = int(last_point["top"])
                 
                 # Draw circle and analyze point
                 marked_image1 = draw_circle_on_image(image_display1, x1, y1, st.session_state.circle_diameter)
@@ -176,31 +164,26 @@ if file1 is not None and file2 is not None:
         with col2:
             st.header("Image 2")
             
-            # Calculate display dimensions for image 2
-            aspect_ratio = image_display2.shape[0] / image_display2.shape[1]
-            display_height = int(display_width * aspect_ratio)
+            # Display image first
+            st.image(image_display2, use_column_width=True)
             
-            # Create canvas for image 2
+            # Add canvas overlay for clicking
             canvas_result2 = st_canvas(
                 fill_color="rgba(255, 255, 0, 0.3)",
                 stroke_width=1,
                 stroke_color="#yellow",
-                background_image=Image.fromarray(image_display2),
+                background_image=None,
                 drawing_mode="point",
                 key="canvas2",
-                width=display_width,
-                height=display_height,
+                width=image_display2.shape[1],
+                height=image_display2.shape[0],
                 display_toolbar=True
             )
             
-            # Handle mouse clicks for image 2
             if canvas_result2.json_data is not None and len(canvas_result2.json_data["objects"]) > 0:
                 last_point = canvas_result2.json_data["objects"][-1]
-                # Scale coordinates back to original image size
-                scale_x = image2.shape[1] / display_width
-                scale_y = image2.shape[0] / display_height
-                x2 = int(last_point["left"] * scale_x)
-                y2 = int(last_point["top"] * scale_y)
+                x2 = int(last_point["left"])
+                y2 = int(last_point["top"])
                 
                 # Draw circle and analyze point
                 marked_image2 = draw_circle_on_image(image_display2, x2, y2, st.session_state.circle_diameter)
