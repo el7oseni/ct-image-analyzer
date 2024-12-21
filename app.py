@@ -3,131 +3,197 @@ import cv2
 import numpy as np
 import pandas as pd
 import pydicom
-from streamlit_drawable_canvas import st_canvas
+import io
 from PIL import Image
 
-# Function to load DICOM image
-def load_dicom(file):
-    dicom_data = pydicom.dcmread(file)
-    image = dicom_data.pixel_array.astype(np.float32)
-    rescale_slope = getattr(dicom_data, 'RescaleSlope', 1)
-    rescale_intercept = getattr(dicom_data, 'RescaleIntercept', 0)
-    image = (image * rescale_slope) + rescale_intercept
-    return image, dicom_data
+# Set page config
+st.set_page_config(page_title="DICOM Image Analyzer", layout="wide")
 
-# Streamlit app
-st.title("CT Image Analyzer (Two Images)")
+# Initialize session state variables
+if 'results' not in st.session_state:
+    st.session_state.results = []
+if 'circle_diameter' not in st.session_state:
+    st.session_state.circle_diameter = 9
+if 'zoom_factor' not in st.session_state:
+    st.session_state.zoom_factor = 1.0
+if 'point1_coords' not in st.session_state:
+    st.session_state.point1_coords = None
+if 'point2_coords' not in st.session_state:
+    st.session_state.point2_coords = None
 
-# File uploaders for two images
-st.subheader("Upload the First DICOM File:")
-first_file = st.file_uploader("First DICOM File", type=["dcm", "IMA"], key="first")
+def load_dicom(uploaded_file):
+    try:
+        if uploaded_file is not None:
+            # Read the file into bytes
+            bytes_data = uploaded_file.getvalue()
+            # Create a dicom dataset from the bytes
+            dicom_data = pydicom.dcmread(io.BytesIO(bytes_data))
+            image = dicom_data.pixel_array.astype(np.float32)
+            
+            # Apply rescale slope and intercept
+            rescale_slope = getattr(dicom_data, 'RescaleSlope', 1)
+            rescale_intercept = getattr(dicom_data, 'RescaleIntercept', 0)
+            image = (image * rescale_slope) + rescale_intercept
+            
+            return image, dicom_data
+    except Exception as e:
+        st.error(f"Error loading DICOM file: {str(e)}")
+        return None, None
+    return None, None
 
-st.subheader("Upload the Second DICOM File:")
-second_file = st.file_uploader("Second DICOM File", type=["dcm", "IMA"], key="second")
+def analyze_point(image, dicom_data, x, y):
+    try:
+        # Create a circular mask
+        mask = np.zeros_like(image, dtype=np.uint8)
+        y_indices, x_indices = np.ogrid[:image.shape[0], :image.shape[1]]
+        distance_from_center = np.sqrt((x_indices - x)**2 + (y_indices - y)**2)
+        mask[distance_from_center <= st.session_state.circle_diameter / 2] = 1
 
-if first_file and second_file:
-    # Load both images
-    first_image, first_dicom = load_dicom(first_file)
-    second_image, second_dicom = load_dicom(second_file)
+        # Extract pixel values within the circle
+        pixels = image[mask == 1]
 
-    # Normalize and prepare images for display
-    first_display = cv2.normalize(first_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-    second_display = cv2.normalize(second_image, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        # Calculate metrics
+        area_pixels = np.sum(mask)
+        pixel_spacing = float(dicom_data.PixelSpacing[0])
+        area_mm2 = area_pixels * (pixel_spacing**2)
+        mean = np.mean(pixels)
+        stddev = np.std(pixels)
+        min_val = np.min(pixels)
+        max_val = np.max(pixels)
 
-    first_display = cv2.cvtColor(first_display, cv2.COLOR_GRAY2BGR)
-    second_display = cv2.cvtColor(second_display, cv2.COLOR_GRAY2BGR)
+        return {
+            'Area (mm²)': f"{area_mm2:.3f}",
+            'Mean': f"{mean:.3f}",
+            'StdDev': f"{stddev:.3f}",
+            'Min': f"{min_val:.3f}",
+            'Max': f"{max_val:.3f}"
+        }
+    except Exception as e:
+        st.error(f"Error analyzing point: {str(e)}")
+        return None
 
-    first_pil = Image.fromarray(first_display)
-    second_pil = Image.fromarray(second_display)
+def draw_circle_on_image(image, x, y, diameter, color=(0, 255, 255)):
+    try:
+        image_copy = image.copy()
+        cv2.circle(image_copy, 
+                  (int(x), int(y)), 
+                  int(diameter/2), 
+                  color, 
+                  1, 
+                  lineType=cv2.LINE_AA)
+        return image_copy
+    except Exception as e:
+        st.error(f"Error drawing circle: {str(e)}")
+        return image
 
-    # Circle diameter slider
-    circle_diameter = st.slider("Adjust Circle Diameter (pixels):", min_value=1, max_value=50, value=9, step=1)
+# Streamlit UI
+st.title("DICOM Image Analyzer")
 
-    st.subheader("Draw a circle on the First Image to select ROI:")
-    first_canvas = st_canvas(
-        fill_color="rgba(255, 0, 0, 0.3)",
-        stroke_width=2,
-        stroke_color="#ff0000",
-        background_image=first_pil,
-        update_streamlit=True,
-        height=first_display.shape[0],
-        width=first_display.shape[1],
-        drawing_mode="circle",
-        key="first_canvas",
-    )
+# File uploaders
+col1, col2 = st.columns(2)
+with col1:
+    file1 = st.file_uploader("Upload first DICOM file", type=['dcm', 'IMA'])
+with col2:
+    file2 = st.file_uploader("Upload second DICOM file", type=['dcm', 'IMA'])
 
-    st.subheader("Draw a circle on the Second Image to select ROI:")
-    second_canvas = st_canvas(
-        fill_color="rgba(255, 0, 0, 0.3)",
-        stroke_width=2,
-        stroke_color="#ff0000",
-        background_image=second_pil,
-        update_streamlit=True,
-        height=second_display.shape[0],
-        width=second_display.shape[1],
-        drawing_mode="circle",
-        key="second_canvas",
-    )
+# Controls
+st.sidebar.header("Controls")
+st.session_state.circle_diameter = st.sidebar.slider("Circle Diameter", 1, 20, st.session_state.circle_diameter)
+st.session_state.zoom_factor = st.sidebar.slider("Zoom Factor", 0.5, 3.0, st.session_state.zoom_factor)
 
-    def process_canvas(canvas_result, image, dicom_data, image_label):
-        if canvas_result.json_data and canvas_result.json_data["objects"]:
-            obj = canvas_result.json_data["objects"][-1]
-            x, y, radius = obj["left"], obj["top"], obj["radius"]
+if st.sidebar.button("Add Blank Row"):
+    st.session_state.results.append({
+        'Image': '',
+        'Point': '',
+        'Area (mm²)': '',
+        'Mean': '',
+        'StdDev': '',
+        'Min': '',
+        'Max': ''
+    })
 
-            # Create a mask for the circular region
-            mask = np.zeros_like(image, dtype=np.uint8)
-            y_indices, x_indices = np.ogrid[:image.shape[0], :image.shape[1]]
-            distance_from_center = np.sqrt((x_indices - x) ** 2 + (y_indices - y) ** 2)
-            mask[distance_from_center <= radius] = 1
+if file1 is not None and file2 is not None:
+    # Load images
+    image1, dicom_data1 = load_dicom(file1)
+    image2, dicom_data2 = load_dicom(file2)
 
-            # Extract pixel values within the circle
-            pixels = image[mask == 1]
+    if image1 is not None and image2 is not None:
+        # Normalize and prepare images for display
+        image_display1 = cv2.normalize(image1, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
+        image_display2 = cv2.normalize(image2, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-            # Calculate metrics
-            area_pixels = np.sum(mask)
-            pixel_spacing = float(dicom_data.PixelSpacing[0])
-            area_mm2 = area_pixels * (pixel_spacing ** 2)
-            mean = np.mean(pixels)
-            stddev = np.std(pixels)
-            min_val = np.min(pixels)
-            max_val = np.max(pixels)
+        # Display images side by side
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.header("Image 1")
+            # Input coordinates
+            x1 = st.number_input("X coordinate for Image 1", 0, image1.shape[1]-1, key="x1")
+            y1 = st.number_input("Y coordinate for Image 1", 0, image1.shape[0]-1, key="y1")
+            
+            if st.button("Analyze point on Image 1"):
+                # Draw circle and display image
+                marked_image1 = draw_circle_on_image(image_display1, x1, y1, st.session_state.circle_diameter)
+                st.image(marked_image1, use_column_width=True)
+                
+                # Analyze and add results
+                results = analyze_point(image1, dicom_data1, x1, y1)
+                if results:
+                    results['Image'] = "Image 1"
+                    results['Point'] = f"({x1}, {y1})"
+                    st.session_state.results.append(results)
+            else:
+                st.image(image_display1, use_column_width=True)
 
-            # Display results
-            st.write(f"**{image_label} ROI Metrics:**")
-            st.write(f"- Area: {area_mm2:.2f} mm²")
-            st.write(f"- Mean Intensity: {mean:.2f}")
-            st.write(f"- Standard Deviation: {stddev:.2f}")
-            st.write(f"- Min Intensity: {min_val:.2f}")
-            st.write(f"- Max Intensity: {max_val:.2f}")
+        with col2:
+            st.header("Image 2")
+            # Input coordinates
+            x2 = st.number_input("X coordinate for Image 2", 0, image2.shape[1]-1, key="x2")
+            y2 = st.number_input("Y coordinate for Image 2", 0, image2.shape[0]-1, key="y2")
+            
+            if st.button("Analyze point on Image 2"):
+                # Draw circle and display image
+                marked_image2 = draw_circle_on_image(image_display2, x2, y2, st.session_state.circle_diameter)
+                st.image(marked_image2, use_column_width=True)
+                
+                # Analyze and add results
+                results = analyze_point(image2, dicom_data2, x2, y2)
+                if results:
+                    results['Image'] = "Image 2"
+                    results['Point'] = f"({x2}, {y2})"
+                    st.session_state.results.append(results)
+            else:
+                st.image(image_display2, use_column_width=True)
 
-            return {
-                "Image": image_label,
-                "Area (mm²)": area_mm2,
-                "Mean Intensity": mean,
-                "Standard Deviation": stddev,
-                "Min Intensity": min_val,
-                "Max Intensity": max_val,
-            }
+        # Display results
+        if st.session_state.results:
+            st.header("Results")
+            df = pd.DataFrame(st.session_state.results)
+            st.dataframe(df)
+            
+            # Download buttons
+            csv = df.to_csv(index=False)
+            st.download_button(
+                label="Download results as CSV",
+                data=csv,
+                file_name="analysis_results.csv",
+                mime="text/csv"
+            )
+            
+            # Excel download
+            excel_buffer = io.BytesIO()
+            df.to_excel(excel_buffer, index=False)
+            excel_data = excel_buffer.getvalue()
+            st.download_button(
+                label="Download results as Excel",
+                data=excel_data,
+                file_name="analysis_results.xlsx",
+                mime="application/vnd.ms-excel"
+            )
 
-    # Process both canvases
-    results = []
-    if first_canvas:
-        result = process_canvas(first_canvas, first_image, first_dicom, "First Image")
-        if result:
-            results.append(result)
+        if st.button("Clear Results"):
+            st.session_state.results = []
+            st.experimental_rerun()
 
-    if second_canvas:
-        result = process_canvas(second_canvas, second_image, second_dicom, "Second Image")
-        if result:
-            results.append(result)
-
-    # Save results as Excel
-    if results:
-        st.subheader("Download Results")
-        results_df = pd.DataFrame(results)
-        st.download_button(
-            label="Download Results as Excel",
-            data=results_df.to_excel(index=False, engine='openpyxl'),
-            file_name="analysis_results.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
+else:
+    st.info("Please upload both DICOM files to begin analysis.")
