@@ -25,6 +25,17 @@ if 'last_click1' not in st.session_state:
     st.session_state.last_click1 = None
 if 'last_click2' not in st.session_state:
     st.session_state.last_click2 = None
+if 'window_center' not in st.session_state:
+    st.session_state.window_center = 40
+if 'window_width' not in st.session_state:
+    st.session_state.window_width = 400
+
+def apply_window_level(image, window_center, window_width):
+    window_min = window_center - window_width // 2
+    window_max = window_center + window_width // 2
+    image_display = np.clip(image, window_min, window_max)
+    image_display = ((image_display - window_min) / (window_max - window_min) * 255).astype(np.uint8)
+    return image_display
 
 def load_dicom(uploaded_file):
     try:
@@ -38,16 +49,22 @@ def load_dicom(uploaded_file):
             rescale_intercept = getattr(dicom_data, 'RescaleIntercept', 0)
             image = (image * rescale_slope) + rescale_intercept
             
-            # Create normalized version for display
-            image_min = np.min(image)
-            image_max = np.max(image)
-            image_display = ((image - image_min) / (image_max - image_min) * 255).astype(np.uint8)
+            # Get window center and width if available
+            if hasattr(dicom_data, 'WindowCenter') and hasattr(dicom_data, 'WindowWidth'):
+                window_center = dicom_data.WindowCenter
+                window_width = dicom_data.WindowWidth
+                if isinstance(window_center, pydicom.multival.MultiValue):
+                    window_center = window_center[0]
+                if isinstance(window_width, pydicom.multival.MultiValue):
+                    window_width = window_width[0]
+                st.session_state.window_center = int(window_center)
+                st.session_state.window_width = int(window_width)
             
-            return image, image_display, dicom_data
+            return image, dicom_data
     except Exception as e:
         st.error(f"Error loading DICOM file: {str(e)}")
-        return None, None, None
-    return None, None, None
+        return None, None
+    return None, None
 
 def analyze_point(image, dicom_data, x, y):
     try:
@@ -79,20 +96,6 @@ def analyze_point(image, dicom_data, x, y):
         st.error(f"Error analyzing point: {str(e)}")
         return None
 
-def draw_circle_on_image(image, x, y, diameter, color=(0, 255, 255)):
-    try:
-        image_copy = image.copy()
-        cv2.circle(image_copy, 
-                  (int(x), int(y)), 
-                  int(diameter/2), 
-                  color, 
-                  1, 
-                  lineType=cv2.LINE_AA)
-        return image_copy
-    except Exception as e:
-        st.error(f"Error drawing circle: {str(e)}")
-        return image
-
 # Streamlit UI
 st.title("DICOM Image Analyzer")
 
@@ -108,6 +111,11 @@ st.sidebar.header("Controls")
 st.session_state.circle_diameter = st.sidebar.slider("Circle Diameter", 1, 20, st.session_state.circle_diameter)
 st.session_state.zoom_factor = st.sidebar.slider("Zoom Factor", 0.5, 3.0, st.session_state.zoom_factor)
 
+# Window/Level controls
+st.sidebar.header("Window/Level Controls")
+st.session_state.window_center = st.sidebar.slider("Window Center", -1000, 3000, st.session_state.window_center)
+st.session_state.window_width = st.sidebar.slider("Window Width", 1, 4000, st.session_state.window_width)
+
 if st.sidebar.button("Add Blank Row"):
     st.session_state.results.append({
         'Image': '',
@@ -121,10 +129,14 @@ if st.sidebar.button("Add Blank Row"):
 
 if file1 is not None and file2 is not None:
     # Load images
-    image1, image_display1, dicom_data1 = load_dicom(file1)
-    image2, image_display2, dicom_data2 = load_dicom(file2)
+    image1, dicom_data1 = load_dicom(file1)
+    image2, dicom_data2 = load_dicom(file2)
 
     if image1 is not None and image2 is not None:
+        # Apply window/level and prepare for display
+        image_display1 = apply_window_level(image1, st.session_state.window_center, st.session_state.window_width)
+        image_display2 = apply_window_level(image2, st.session_state.window_center, st.session_state.window_width)
+
         # Convert to RGB for display
         if len(image_display1.shape) == 2:
             image_display1 = cv2.cvtColor(image_display1, cv2.COLOR_GRAY2RGB)
