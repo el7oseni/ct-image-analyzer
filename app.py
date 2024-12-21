@@ -31,18 +31,23 @@ def load_dicom(uploaded_file):
         if uploaded_file is not None:
             bytes_data = uploaded_file.getvalue()
             dicom_data = pydicom.dcmread(io.BytesIO(bytes_data))
-            image = dicom_data.pixel_array.astype(float)
+            image = dicom_data.pixel_array.astype(np.float32)
             
             # Apply rescale slope and intercept
             rescale_slope = getattr(dicom_data, 'RescaleSlope', 1)
             rescale_intercept = getattr(dicom_data, 'RescaleIntercept', 0)
             image = (image * rescale_slope) + rescale_intercept
             
-            return image, dicom_data
+            # Create normalized version for display
+            image_min = np.min(image)
+            image_max = np.max(image)
+            image_display = ((image - image_min) / (image_max - image_min) * 255).astype(np.uint8)
+            
+            return image, image_display, dicom_data
     except Exception as e:
         st.error(f"Error loading DICOM file: {str(e)}")
-        return None, None
-    return None, None
+        return None, None, None
+    return None, None, None
 
 def analyze_point(image, dicom_data, x, y):
     try:
@@ -58,12 +63,10 @@ def analyze_point(image, dicom_data, x, y):
         area_pixels = np.sum(mask)
         pixel_spacing = float(dicom_data.PixelSpacing[0])
         area_mm2 = area_pixels * (pixel_spacing**2)
-        
-        # Calculate statistics from the original pixel values
-        mean = np.mean(pixels) if len(pixels) > 0 else 0
-        stddev = np.std(pixels) if len(pixels) > 0 else 0
-        min_val = np.min(pixels) if len(pixels) > 0 else 0
-        max_val = np.max(pixels) if len(pixels) > 0 else 0
+        mean = np.mean(pixels)
+        stddev = np.std(pixels)
+        min_val = np.min(pixels)
+        max_val = np.max(pixels)
 
         return {
             'Area (mm²)': f"{area_mm2:.3f}",
@@ -75,21 +78,6 @@ def analyze_point(image, dicom_data, x, y):
     except Exception as e:
         st.error(f"Error analyzing point: {str(e)}")
         return None
-
-def prepare_display_image(image):
-    """Prepare image for display while preserving original values for analysis"""
-    display_image = image.copy()
-    
-    # Normalize to 0-255 range for display
-    image_min = np.min(display_image)
-    image_max = np.max(display_image)
-    display_image = ((display_image - image_min) / (image_max - image_min) * 255).astype(np.uint8)
-    
-    # Convert to RGB
-    if len(display_image.shape) == 2:
-        display_image = cv2.cvtColor(display_image, cv2.COLOR_GRAY2RGB)
-        
-    return display_image
 
 def draw_circle_on_image(image, x, y, diameter, color=(0, 255, 255)):
     try:
@@ -133,13 +121,15 @@ if st.sidebar.button("Add Blank Row"):
 
 if file1 is not None and file2 is not None:
     # Load images
-    image1, dicom_data1 = load_dicom(file1)
-    image2, dicom_data2 = load_dicom(file2)
+    image1, image_display1, dicom_data1 = load_dicom(file1)
+    image2, image_display2, dicom_data2 = load_dicom(file2)
 
     if image1 is not None and image2 is not None:
-        # Prepare display images
-        image_display1 = prepare_display_image(image1)
-        image_display2 = prepare_display_image(image2)
+        # Convert to RGB for display
+        if len(image_display1.shape) == 2:
+            image_display1 = cv2.cvtColor(image_display1, cv2.COLOR_GRAY2RGB)
+        if len(image_display2.shape) == 2:
+            image_display2 = cv2.cvtColor(image_display2, cv2.COLOR_GRAY2RGB)
 
         # Display images side by side with canvas
         col1, col2 = st.columns(2)
