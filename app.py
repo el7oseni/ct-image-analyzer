@@ -5,7 +5,6 @@ import pandas as pd
 import pydicom
 import io
 from PIL import Image
-from streamlit_image_coordinates import streamlit_image_coordinates
 
 # Set page config
 st.set_page_config(page_title="DICOM Image Analyzer", layout="wide")
@@ -17,21 +16,18 @@ if 'circle_diameter' not in st.session_state:
     st.session_state.circle_diameter = 9
 if 'zoom_factor' not in st.session_state:
     st.session_state.zoom_factor = 1.0
-if 'last_image1' not in st.session_state:
-    st.session_state.last_image1 = None
-if 'last_image2' not in st.session_state:
-    st.session_state.last_image2 = None
+if 'clicked_coords1' not in st.session_state:
+    st.session_state.clicked_coords1 = None
+if 'clicked_coords2' not in st.session_state:
+    st.session_state.clicked_coords2 = None
 
 def load_dicom(uploaded_file):
     try:
         if uploaded_file is not None:
-            # Read the file into bytes
             bytes_data = uploaded_file.getvalue()
-            # Create a dicom dataset from the bytes
             dicom_data = pydicom.dcmread(io.BytesIO(bytes_data))
             image = dicom_data.pixel_array.astype(np.float32)
             
-            # Apply rescale slope and intercept
             rescale_slope = getattr(dicom_data, 'RescaleSlope', 1)
             rescale_intercept = getattr(dicom_data, 'RescaleIntercept', 0)
             image = (image * rescale_slope) + rescale_intercept
@@ -44,16 +40,12 @@ def load_dicom(uploaded_file):
 
 def analyze_point(image, dicom_data, x, y):
     try:
-        # Create a circular mask
         mask = np.zeros_like(image, dtype=np.uint8)
         y_indices, x_indices = np.ogrid[:image.shape[0], :image.shape[1]]
         distance_from_center = np.sqrt((x_indices - x)**2 + (y_indices - y)**2)
         mask[distance_from_center <= st.session_state.circle_diameter / 2] = 1
 
-        # Extract pixel values within the circle
         pixels = image[mask == 1]
-
-        # Calculate metrics
         area_pixels = np.sum(mask)
         pixel_spacing = float(dicom_data.PixelSpacing[0])
         area_mm2 = area_pixels * (pixel_spacing**2)
@@ -129,17 +121,15 @@ if file1 is not None and file2 is not None:
         with col1:
             st.header("Image 1")
             
-            # Get click coordinates
-            coordinates1 = streamlit_image_coordinates(
-                image_display1,
-                key="coord1"
-            )
+            # Create columns for coordinate sliders
+            slider_col1, slider_col2 = st.columns(2)
+            with slider_col1:
+                x1 = st.slider("X coordinate", 0, image1.shape[1]-1, key="x1")
+            with slider_col2:
+                y1 = st.slider("Y coordinate", 0, image1.shape[0]-1, key="y1")
             
-            if coordinates1 and coordinates1 != st.session_state.last_image1:
-                st.session_state.last_image1 = coordinates1
-                x1, y1 = coordinates1['x'], coordinates1['y']
-                
-                # Draw circle and display updated image
+            if st.button("Analyze point on Image 1"):
+                # Draw circle and display image
                 marked_image1 = draw_circle_on_image(image_display1, x1, y1, st.session_state.circle_diameter)
                 st.image(marked_image1, use_column_width=True)
                 
@@ -155,17 +145,15 @@ if file1 is not None and file2 is not None:
         with col2:
             st.header("Image 2")
             
-            # Get click coordinates
-            coordinates2 = streamlit_image_coordinates(
-                image_display2,
-                key="coord2"
-            )
+            # Create columns for coordinate sliders
+            slider_col1, slider_col2 = st.columns(2)
+            with slider_col1:
+                x2 = st.slider("X coordinate", 0, image2.shape[1]-1, key="x2")
+            with slider_col2:
+                y2 = st.slider("Y coordinate", 0, image2.shape[0]-1, key="y2")
             
-            if coordinates2 and coordinates2 != st.session_state.last_image2:
-                st.session_state.last_image2 = coordinates2
-                x2, y2 = coordinates2['x'], coordinates2['y']
-                
-                # Draw circle and display updated image
+            if st.button("Analyze point on Image 2"):
+                # Draw circle and display image
                 marked_image2 = draw_circle_on_image(image_display2, x2, y2, st.session_state.circle_diameter)
                 st.image(marked_image2, use_column_width=True)
                 
