@@ -5,7 +5,7 @@ import pandas as pd
 import pydicom
 import io
 from PIL import Image
-from streamlit_drawable_canvas import st_canvas
+from streamlit_image_coordinates import streamlit_image_coordinates
 
 # Set page config
 st.set_page_config(page_title="DICOM Image Analyzer", layout="wide")
@@ -17,10 +17,10 @@ if 'circle_diameter' not in st.session_state:
     st.session_state.circle_diameter = 9
 if 'zoom_factor' not in st.session_state:
     st.session_state.zoom_factor = 1.0
-if 'point1_coords' not in st.session_state:
-    st.session_state.point1_coords = None
-if 'point2_coords' not in st.session_state:
-    st.session_state.point2_coords = None
+if 'last_image1' not in st.session_state:
+    st.session_state.last_image1 = None
+if 'last_image2' not in st.session_state:
+    st.session_state.last_image2 = None
 
 def load_dicom(uploaded_file):
     try:
@@ -129,28 +129,17 @@ if file1 is not None and file2 is not None:
         with col1:
             st.header("Image 1")
             
-            # Display image first
-            st.image(image_display1, use_column_width=True)
-            
-            # Add canvas overlay for clicking
-            canvas_result1 = st_canvas(
-                fill_color="rgba(255, 255, 0, 0.3)",
-                stroke_width=1,
-                stroke_color="#yellow",
-                background_image=None,
-                drawing_mode="point",
-                key="canvas1",
-                width=image_display1.shape[1],
-                height=image_display1.shape[0],
-                display_toolbar=True
+            # Get click coordinates
+            coordinates1 = streamlit_image_coordinates(
+                image_display1,
+                key="coord1"
             )
             
-            if canvas_result1.json_data is not None and len(canvas_result1.json_data["objects"]) > 0:
-                last_point = canvas_result1.json_data["objects"][-1]
-                x1 = int(last_point["left"])
-                y1 = int(last_point["top"])
+            if coordinates1 and coordinates1 != st.session_state.last_image1:
+                st.session_state.last_image1 = coordinates1
+                x1, y1 = coordinates1['x'], coordinates1['y']
                 
-                # Draw circle and analyze point
+                # Draw circle and display updated image
                 marked_image1 = draw_circle_on_image(image_display1, x1, y1, st.session_state.circle_diameter)
                 st.image(marked_image1, use_column_width=True)
                 
@@ -160,32 +149,23 @@ if file1 is not None and file2 is not None:
                     results['Image'] = "Image 1"
                     results['Point'] = f"({x1}, {y1})"
                     st.session_state.results.append(results)
+            else:
+                st.image(image_display1, use_column_width=True)
 
         with col2:
             st.header("Image 2")
             
-            # Display image first
-            st.image(image_display2, use_column_width=True)
-            
-            # Add canvas overlay for clicking
-            canvas_result2 = st_canvas(
-                fill_color="rgba(255, 255, 0, 0.3)",
-                stroke_width=1,
-                stroke_color="#yellow",
-                background_image=None,
-                drawing_mode="point",
-                key="canvas2",
-                width=image_display2.shape[1],
-                height=image_display2.shape[0],
-                display_toolbar=True
+            # Get click coordinates
+            coordinates2 = streamlit_image_coordinates(
+                image_display2,
+                key="coord2"
             )
             
-            if canvas_result2.json_data is not None and len(canvas_result2.json_data["objects"]) > 0:
-                last_point = canvas_result2.json_data["objects"][-1]
-                x2 = int(last_point["left"])
-                y2 = int(last_point["top"])
+            if coordinates2 and coordinates2 != st.session_state.last_image2:
+                st.session_state.last_image2 = coordinates2
+                x2, y2 = coordinates2['x'], coordinates2['y']
                 
-                # Draw circle and analyze point
+                # Draw circle and display updated image
                 marked_image2 = draw_circle_on_image(image_display2, x2, y2, st.session_state.circle_diameter)
                 st.image(marked_image2, use_column_width=True)
                 
@@ -195,6 +175,8 @@ if file1 is not None and file2 is not None:
                     results['Image'] = "Image 2"
                     results['Point'] = f"({x2}, {y2})"
                     st.session_state.results.append(results)
+            else:
+                st.image(image_display2, use_column_width=True)
 
         # Display results
         if st.session_state.results:
