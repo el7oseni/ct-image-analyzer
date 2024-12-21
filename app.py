@@ -5,6 +5,7 @@ import pandas as pd
 import pydicom
 import io
 from PIL import Image
+from streamlit_drawable_canvas import st_canvas
 
 # Set page config
 st.set_page_config(page_title="DICOM Image Analyzer", layout="wide")
@@ -16,21 +17,18 @@ if 'circle_diameter' not in st.session_state:
     st.session_state.circle_diameter = 9
 if 'zoom_factor' not in st.session_state:
     st.session_state.zoom_factor = 1.0
-if 'point1_coords' not in st.session_state:
-    st.session_state.point1_coords = None
-if 'point2_coords' not in st.session_state:
-    st.session_state.point2_coords = None
+if 'last_click1' not in st.session_state:
+    st.session_state.last_click1 = None
+if 'last_click2' not in st.session_state:
+    st.session_state.last_click2 = None
 
 def load_dicom(uploaded_file):
     try:
         if uploaded_file is not None:
-            # Read the file into bytes
             bytes_data = uploaded_file.getvalue()
-            # Create a dicom dataset from the bytes
             dicom_data = pydicom.dcmread(io.BytesIO(bytes_data))
             image = dicom_data.pixel_array.astype(np.float32)
             
-            # Apply rescale slope and intercept
             rescale_slope = getattr(dicom_data, 'RescaleSlope', 1)
             rescale_intercept = getattr(dicom_data, 'RescaleIntercept', 0)
             image = (image * rescale_slope) + rescale_intercept
@@ -43,16 +41,12 @@ def load_dicom(uploaded_file):
 
 def analyze_point(image, dicom_data, x, y):
     try:
-        # Create a circular mask
         mask = np.zeros_like(image, dtype=np.uint8)
         y_indices, x_indices = np.ogrid[:image.shape[0], :image.shape[1]]
         distance_from_center = np.sqrt((x_indices - x)**2 + (y_indices - y)**2)
         mask[distance_from_center <= st.session_state.circle_diameter / 2] = 1
 
-        # Extract pixel values within the circle
         pixels = image[mask == 1]
-
-        # Calculate metrics
         area_pixels = np.sum(mask)
         pixel_spacing = float(dicom_data.PixelSpacing[0])
         area_mm2 = area_pixels * (pixel_spacing**2)
@@ -122,48 +116,66 @@ if file1 is not None and file2 is not None:
         image_display1 = cv2.normalize(image1, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
         image_display2 = cv2.normalize(image2, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
 
-        # Display images side by side
+        # Display images side by side with canvas
         col1, col2 = st.columns(2)
         
         with col1:
             st.header("Image 1")
-            # Input coordinates
-            x1 = st.number_input("X coordinate for Image 1", 0, image1.shape[1]-1, key="x1")
-            y1 = st.number_input("Y coordinate for Image 1", 0, image1.shape[0]-1, key="y1")
+            canvas_result1 = st_canvas(
+                fill_color="rgba(255, 255, 0, 0.3)",
+                stroke_width=1,
+                stroke_color="#yellow",
+                background_image=Image.fromarray(image_display1),
+                drawing_mode="point",
+                key="canvas1",
+                width=image_display1.shape[1],
+                height=image_display1.shape[0]
+            )
             
-            if st.button("Analyze point on Image 1"):
-                # Draw circle and display image
-                marked_image1 = draw_circle_on_image(image_display1, x1, y1, st.session_state.circle_diameter)
-                st.image(marked_image1, use_column_width=True)
+            if canvas_result1.json_data is not None and len(canvas_result1.json_data["objects"]) > 0:
+                last_point = canvas_result1.json_data["objects"][-1]
+                current_click = (int(last_point["left"]), int(last_point["top"]))
                 
-                # Analyze and add results
-                results = analyze_point(image1, dicom_data1, x1, y1)
-                if results:
-                    results['Image'] = "Image 1"
-                    results['Point'] = f"({x1}, {y1})"
-                    st.session_state.results.append(results)
-            else:
-                st.image(image_display1, use_column_width=True)
+                if st.session_state.last_click1 != current_click:
+                    st.session_state.last_click1 = current_click
+                    x1, y1 = current_click
+                    
+                    # Draw circle and analyze point
+                    marked_image1 = draw_circle_on_image(image_display1, x1, y1, st.session_state.circle_diameter)
+                    results = analyze_point(image1, dicom_data1, x1, y1)
+                    if results:
+                        results['Image'] = "Image 1"
+                        results['Point'] = f"({x1}, {y1})"
+                        st.session_state.results.append(results)
 
         with col2:
             st.header("Image 2")
-            # Input coordinates
-            x2 = st.number_input("X coordinate for Image 2", 0, image2.shape[1]-1, key="x2")
-            y2 = st.number_input("Y coordinate for Image 2", 0, image2.shape[0]-1, key="y2")
+            canvas_result2 = st_canvas(
+                fill_color="rgba(255, 255, 0, 0.3)",
+                stroke_width=1,
+                stroke_color="#yellow",
+                background_image=Image.fromarray(image_display2),
+                drawing_mode="point",
+                key="canvas2",
+                width=image_display2.shape[1],
+                height=image_display2.shape[0]
+            )
             
-            if st.button("Analyze point on Image 2"):
-                # Draw circle and display image
-                marked_image2 = draw_circle_on_image(image_display2, x2, y2, st.session_state.circle_diameter)
-                st.image(marked_image2, use_column_width=True)
+            if canvas_result2.json_data is not None and len(canvas_result2.json_data["objects"]) > 0:
+                last_point = canvas_result2.json_data["objects"][-1]
+                current_click = (int(last_point["left"]), int(last_point["top"]))
                 
-                # Analyze and add results
-                results = analyze_point(image2, dicom_data2, x2, y2)
-                if results:
-                    results['Image'] = "Image 2"
-                    results['Point'] = f"({x2}, {y2})"
-                    st.session_state.results.append(results)
-            else:
-                st.image(image_display2, use_column_width=True)
+                if st.session_state.last_click2 != current_click:
+                    st.session_state.last_click2 = current_click
+                    x2, y2 = current_click
+                    
+                    # Draw circle and analyze point
+                    marked_image2 = draw_circle_on_image(image_display2, x2, y2, st.session_state.circle_diameter)
+                    results = analyze_point(image2, dicom_data2, x2, y2)
+                    if results:
+                        results['Image'] = "Image 2"
+                        results['Point'] = f"({x2}, {y2})"
+                        st.session_state.results.append(results)
 
         # Display results
         if st.session_state.results:
