@@ -8,7 +8,11 @@ from PIL import Image
 from streamlit_drawable_canvas import st_canvas
 
 # Set page config
-st.set_page_config(page_title="DICOM Image Analyzer", layout="wide")
+st.set_page_config(
+    page_title="DICOM Image Analyzer",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
 
 # Initialize session state variables
 if 'results' not in st.session_state:
@@ -29,9 +33,15 @@ def load_dicom(uploaded_file):
             dicom_data = pydicom.dcmread(io.BytesIO(bytes_data))
             image = dicom_data.pixel_array.astype(np.float32)
             
+            # Apply rescale slope and intercept
             rescale_slope = getattr(dicom_data, 'RescaleSlope', 1)
             rescale_intercept = getattr(dicom_data, 'RescaleIntercept', 0)
             image = (image * rescale_slope) + rescale_intercept
+            
+            # Normalize to 0-255 range
+            image_min = np.min(image)
+            image_max = np.max(image)
+            image = ((image - image_min) / (image_max - image_min) * 255).astype(np.uint8)
             
             return image, dicom_data
     except Exception as e:
@@ -41,12 +51,16 @@ def load_dicom(uploaded_file):
 
 def analyze_point(image, dicom_data, x, y):
     try:
+        # Create a circular mask
         mask = np.zeros_like(image, dtype=np.uint8)
         y_indices, x_indices = np.ogrid[:image.shape[0], :image.shape[1]]
         distance_from_center = np.sqrt((x_indices - x)**2 + (y_indices - y)**2)
         mask[distance_from_center <= st.session_state.circle_diameter / 2] = 1
 
+        # Extract pixel values within the circle
         pixels = image[mask == 1]
+
+        # Calculate metrics
         area_pixels = np.sum(mask)
         pixel_spacing = float(dicom_data.PixelSpacing[0])
         area_mm2 = area_pixels * (pixel_spacing**2)
@@ -112,15 +126,24 @@ if file1 is not None and file2 is not None:
     image2, dicom_data2 = load_dicom(file2)
 
     if image1 is not None and image2 is not None:
-        # Normalize and prepare images for display
-        image_display1 = cv2.normalize(image1, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-        image_display2 = cv2.normalize(image2, None, 0, 255, cv2.NORM_MINMAX).astype(np.uint8)
-
         # Display images side by side with canvas
         col1, col2 = st.columns(2)
         
+        # Calculate display dimensions
+        display_width = 512  # Base display width
+        
         with col1:
             st.header("Image 1")
+            # Convert to RGB if needed
+            if len(image1.shape) == 2:
+                image_display1 = cv2.cvtColor(image1, cv2.COLOR_GRAY2RGB)
+            else:
+                image_display1 = image1.copy()
+            
+            # Calculate height while maintaining aspect ratio
+            aspect_ratio = image_display1.shape[0] / image_display1.shape[1]
+            display_height = int(display_width * aspect_ratio)
+            
             canvas_result1 = st_canvas(
                 fill_color="rgba(255, 255, 0, 0.3)",
                 stroke_width=1,
@@ -128,28 +151,42 @@ if file1 is not None and file2 is not None:
                 background_image=Image.fromarray(image_display1),
                 drawing_mode="point",
                 key="canvas1",
-                width=image_display1.shape[1],
-                height=image_display1.shape[0]
+                width=display_width,
+                height=display_height,
+                display_toolbar=True
             )
             
             if canvas_result1.json_data is not None and len(canvas_result1.json_data["objects"]) > 0:
                 last_point = canvas_result1.json_data["objects"][-1]
-                current_click = (int(last_point["left"]), int(last_point["top"]))
+                # Scale coordinates back to original image size
+                scale_x = image1.shape[1] / display_width
+                scale_y = image1.shape[0] / display_height
+                x = int(last_point["left"] * scale_x)
+                y = int(last_point["top"] * scale_y)
+                current_click = (x, y)
                 
                 if st.session_state.last_click1 != current_click:
                     st.session_state.last_click1 = current_click
-                    x1, y1 = current_click
                     
-                    # Draw circle and analyze point
-                    marked_image1 = draw_circle_on_image(image_display1, x1, y1, st.session_state.circle_diameter)
-                    results = analyze_point(image1, dicom_data1, x1, y1)
+                    # Analyze point and add to results
+                    results = analyze_point(image1, dicom_data1, x, y)
                     if results:
                         results['Image'] = "Image 1"
-                        results['Point'] = f"({x1}, {y1})"
+                        results['Point'] = f"({x}, {y})"
                         st.session_state.results.append(results)
 
         with col2:
             st.header("Image 2")
+            # Convert to RGB if needed
+            if len(image2.shape) == 2:
+                image_display2 = cv2.cvtColor(image2, cv2.COLOR_GRAY2RGB)
+            else:
+                image_display2 = image2.copy()
+            
+            # Calculate height while maintaining aspect ratio
+            aspect_ratio = image_display2.shape[0] / image_display2.shape[1]
+            display_height = int(display_width * aspect_ratio)
+            
             canvas_result2 = st_canvas(
                 fill_color="rgba(255, 255, 0, 0.3)",
                 stroke_width=1,
@@ -157,24 +194,28 @@ if file1 is not None and file2 is not None:
                 background_image=Image.fromarray(image_display2),
                 drawing_mode="point",
                 key="canvas2",
-                width=image_display2.shape[1],
-                height=image_display2.shape[0]
+                width=display_width,
+                height=display_height,
+                display_toolbar=True
             )
             
             if canvas_result2.json_data is not None and len(canvas_result2.json_data["objects"]) > 0:
                 last_point = canvas_result2.json_data["objects"][-1]
-                current_click = (int(last_point["left"]), int(last_point["top"]))
+                # Scale coordinates back to original image size
+                scale_x = image2.shape[1] / display_width
+                scale_y = image2.shape[0] / display_height
+                x = int(last_point["left"] * scale_x)
+                y = int(last_point["top"] * scale_y)
+                current_click = (x, y)
                 
                 if st.session_state.last_click2 != current_click:
                     st.session_state.last_click2 = current_click
-                    x2, y2 = current_click
                     
-                    # Draw circle and analyze point
-                    marked_image2 = draw_circle_on_image(image_display2, x2, y2, st.session_state.circle_diameter)
-                    results = analyze_point(image2, dicom_data2, x2, y2)
+                    # Analyze point and add to results
+                    results = analyze_point(image2, dicom_data2, x, y)
                     if results:
                         results['Image'] = "Image 2"
-                        results['Point'] = f"({x2}, {y2})"
+                        results['Point'] = f"({x}, {y})"
                         st.session_state.results.append(results)
 
         # Display results
