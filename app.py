@@ -16,18 +16,21 @@ if 'circle_diameter' not in st.session_state:
     st.session_state.circle_diameter = 9
 if 'zoom_factor' not in st.session_state:
     st.session_state.zoom_factor = 1.0
-if 'clicked_coords1' not in st.session_state:
-    st.session_state.clicked_coords1 = None
-if 'clicked_coords2' not in st.session_state:
-    st.session_state.clicked_coords2 = None
+if 'point1_coords' not in st.session_state:
+    st.session_state.point1_coords = None
+if 'point2_coords' not in st.session_state:
+    st.session_state.point2_coords = None
 
 def load_dicom(uploaded_file):
     try:
         if uploaded_file is not None:
+            # Read the file into bytes
             bytes_data = uploaded_file.getvalue()
+            # Create a dicom dataset from the bytes
             dicom_data = pydicom.dcmread(io.BytesIO(bytes_data))
             image = dicom_data.pixel_array.astype(np.float32)
             
+            # Apply rescale slope and intercept
             rescale_slope = getattr(dicom_data, 'RescaleSlope', 1)
             rescale_intercept = getattr(dicom_data, 'RescaleIntercept', 0)
             image = (image * rescale_slope) + rescale_intercept
@@ -40,12 +43,16 @@ def load_dicom(uploaded_file):
 
 def analyze_point(image, dicom_data, x, y):
     try:
+        # Create a circular mask
         mask = np.zeros_like(image, dtype=np.uint8)
         y_indices, x_indices = np.ogrid[:image.shape[0], :image.shape[1]]
         distance_from_center = np.sqrt((x_indices - x)**2 + (y_indices - y)**2)
         mask[distance_from_center <= st.session_state.circle_diameter / 2] = 1
 
+        # Extract pixel values within the circle
         pixels = image[mask == 1]
+
+        # Calculate metrics
         area_pixels = np.sum(mask)
         pixel_spacing = float(dicom_data.PixelSpacing[0])
         area_mm2 = area_pixels * (pixel_spacing**2)
@@ -120,13 +127,9 @@ if file1 is not None and file2 is not None:
         
         with col1:
             st.header("Image 1")
-            
-            # Create columns for coordinate sliders
-            slider_col1, slider_col2 = st.columns(2)
-            with slider_col1:
-                x1 = st.slider("X coordinate", 0, image1.shape[1]-1, key="x1")
-            with slider_col2:
-                y1 = st.slider("Y coordinate", 0, image1.shape[0]-1, key="y1")
+            # Input coordinates
+            x1 = st.number_input("X coordinate for Image 1", 0, image1.shape[1]-1, key="x1")
+            y1 = st.number_input("Y coordinate for Image 1", 0, image1.shape[0]-1, key="y1")
             
             if st.button("Analyze point on Image 1"):
                 # Draw circle and display image
@@ -144,13 +147,9 @@ if file1 is not None and file2 is not None:
 
         with col2:
             st.header("Image 2")
-            
-            # Create columns for coordinate sliders
-            slider_col1, slider_col2 = st.columns(2)
-            with slider_col1:
-                x2 = st.slider("X coordinate", 0, image2.shape[1]-1, key="x2")
-            with slider_col2:
-                y2 = st.slider("Y coordinate", 0, image2.shape[0]-1, key="y2")
+            # Input coordinates
+            x2 = st.number_input("X coordinate for Image 2", 0, image2.shape[1]-1, key="x2")
+            y2 = st.number_input("Y coordinate for Image 2", 0, image2.shape[0]-1, key="y2")
             
             if st.button("Analyze point on Image 2"):
                 # Draw circle and display image
